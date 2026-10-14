@@ -3072,6 +3072,13 @@ applyTheme();
 setArSize(state.settings.arSize);
 renderPresets(); renderDashboard(); renderTasbih(); renderDuaList(); renderHadithList(); renderQuranList(); renderNightList(); renderProgress();
 restoreNav();
+try {
+  if (new URLSearchParams(location.search).get('reset') === '1') {
+    state.migrations.onboarded = false;
+    saveNow();
+    history.replaceState(null, '', location.pathname);
+  }
+} catch (e) {}
 if (!state.migrations.onboarded) setTimeout(startOnboarding, 200);
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
