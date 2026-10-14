@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'iqra-v63';
+const CACHE_VERSION = 'iqra-v64';
 const CACHE_ASSETS = [
   './', './index.html', './manifest.json', './count.js', './fonts.css',
   './favicon.png', './apple-touch-icon.png', './icon-192.png', './icon-512.png',
@@ -19,13 +19,19 @@ const CACHE_ASSETS = [
 self.addEventListener('install', function(event) {
   event.waitUntil(
     caches.open(CACHE_VERSION).then(function(cache) {
-      return cache.addAll(CACHE_ASSETS);
-    }).catch(function(err) {
-      console.error('SW install: cache.addAll failed', err);
+      // allSettled: если часть ассетов не найдётся — кэшируем всё остальное
+      return Promise.allSettled(
+        CACHE_ASSETS.map(function(url) {
+          return cache.add(url).catch(function(err) {
+            console.warn('SW: failed to cache', url, err);
+          });
+        })
+      );
     })
   );
   self.skipWaiting();
 });
+
 self.addEventListener('activate', function(event) {
   event.waitUntil(
     caches.keys().then(function(keys) {
@@ -44,6 +50,7 @@ self.addEventListener('fetch', function(event) {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
+  // Навигация / HTML — network-first с fallback на кэш
   if (req.mode === 'navigate' || req.destination === 'document') {
     event.respondWith(
       fetch(req).then(function(res) {
@@ -54,13 +61,20 @@ self.addEventListener('fetch', function(event) {
         return res;
       }).catch(function() {
         return caches.match(req).then(function(r) {
-          return r || caches.match('./index.html');
+          if (r) return r;
+          return caches.match('./index.html').then(function(r2) {
+            return r2 || new Response('Offline', {
+              status: 503,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            });
+          });
         });
       })
     );
     return;
   }
 
+  // Остальное — cache-first с сетевым fallback
   event.respondWith(
     caches.match(req).then(function(cached) {
       if (cached) return cached;
@@ -70,7 +84,13 @@ self.addEventListener('fetch', function(event) {
           caches.open(CACHE_VERSION).then(function(c) { c.put(req, copy); });
         }
         return res;
-      }).catch(function() { return cached; });
+      }).catch(function() {
+        // Корректный fallback вместо undefined
+        return cached || new Response('', {
+          status: 504,
+          statusText: 'Offline'
+        });
+      });
     })
   );
 });
